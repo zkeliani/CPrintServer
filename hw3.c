@@ -72,6 +72,31 @@ typedef struct
 	int count;
 } GlobalQueue;
 
+int min(int x, int y)
+{
+	return (x < y) ? x : y;
+}
+
+typedef struct
+{
+	int val;
+	sem_t gate;
+	sem_t mutex;
+} CSem;
+
+CSem create_CSem(int x)
+{
+	CSem csem;
+	csem.val = x;
+	sem_init(&csem.gate, 1, min(1, csem.val));
+	sem_init(&csem.mutex, 1, 1);
+}
+
+void Pc(CSem cs)
+{
+	
+}
+
 GlobalQueue global_queue;
 sem_t full, empty, rw;
 
