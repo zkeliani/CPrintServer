@@ -122,10 +122,14 @@ int main(int argc, char *argv[])
 	//for seeding random functions
 	srand(time(NULL));
 	
-	PrintJob job1 = create_job();
-	printf("%d \n", job1.bytes);
-	User user1 = create_user();
-	printf("%d \n", user1.remaining_jobs);
+	User users[x];
+	
+	int q;
+	for (q = 0; q < x; q++)
+	{
+		User temp = create_user();
+		users[q] = temp;
+	}
 	
 	global_queue.count = 0;
 	
