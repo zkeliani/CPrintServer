@@ -198,6 +198,9 @@ int main(int argc, char *argv[])
 		totalJobs = 0;
 		int iter;
 		int iter2;
+		int totalBytes;
+		totalBytes = 0;
+		
 		for (iter = 0; iter < x; iter++)
 		{
 			totalJobs = users[iter].remaining_jobs;
@@ -210,9 +213,18 @@ int main(int argc, char *argv[])
 			for (iter2 = 0; iter2 < users[iter].remaining_jobs; iter2++)
 			{
 				printf("Job size: %d\n", users[iter].jobs[iter2].bytes);
+				totalBytes = totalBytes + users[iter].jobs[iter2].bytes;
 			}
 		}
 		
+		int mini;
+		int k;
+		for (mini = 0; mini < y; mini++)
+		{
+			printf("Printer %d: \n", mini+1);
+			printf("Jobs %d: \n", totalJobs/y);
+			printf("Bytes Processed %d: \n", totalBytes/y);
+		}
 		
 	}
 	else
