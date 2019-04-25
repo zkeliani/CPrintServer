@@ -1,39 +1,57 @@
-#include <stdio.h>
-#include <semaphore.h>
-#include <pthread.h>
-#include <stdlib.h>
-#include <zconf.h>
-#include <string.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <stddef.h>
-#include <sys/wait.h>
-#include <sys/mman.h>
+/**
+ * FCFS implementation of a print server
+ * Zack Keliani - CMSC 312
+ * */
 
-struct Print {
-    int size;
-    char temp;
+#include <pthread.h>
+#include <semaphore.h>
+#include <stdio.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <zconf.h>
+
+#define MAX_JOBS 25
+#define MAX_USER_JOBS 30
+#define MIN_BYTES 100
+
+int *x, *y;
+sem_t *mutex, *empty, *full;
+struct PrintJob *queue;
+
+struct PrintJob
+{
+    int bytes;
 } item;
 
-sem_t *mutex, *empty, *full;
-struct Print *buf;
-int *in, *out;
+void sig_func(int sig)
+{
+    signal(SIGSEGV, sig_func);
+    printf("Caught signal %d, threads terminated\n", sig);
+    fflush(stdout);
+}
 
-void Producer(int jobs, struct Print request[], int pid) {
+void User(int jobs, struct PrintJob pending[], int pid)
+{
     struct timespec req, rem;
-
     int i;
-    for (i = 0; i < jobs; i++) {
+
+    for (i = 0; i < jobs; i++)
+    {
         sem_wait(empty);
         sem_wait(mutex);
 
-        buf[*out] = request[i];
-        *out = (*out + 1) % 25;
+        queue[*out] = pending[i];
+        *x = (*x + 1) % MAX_JOBS;
 
         sem_post(mutex);
         sem_post(full);
 
-        printf("Process %d submitting job, size %d\n", pid, request[i].size);
+        printf("Process %d submitting job, size %d\n", pid, pending[i].bytes);
 
         req.tv_sec = 0;
         req.tv_nsec = (rand() % 1000000000 - 100000000 + 1) + 100000000;
@@ -41,85 +59,101 @@ void Producer(int jobs, struct Print request[], int pid) {
     }
 }
 
-void *Consumer() {
+void *Printer()
+{
     int count = 0;
-    int printed = 0;
-    int time_elapsed = 0;
+    int finished = 0;
+    int tcount = 0;
 
-    while (1) {
+    while (1)
+    {
         time_t start = time(NULL);
 
         sem_wait(full);
         sem_wait(mutex);
 
         count++;
-        printed += buf[*in].size;
-        *in = (*in + 1) % 25;
+        finished += queue[*in].bytes;
+        *y = (*y + 1) % MAX_JOBS;
 
         sem_post(mutex);
         sem_post(empty);
 
-        time_t end = time(NULL);
-        time_elapsed += (end - start);
-        printf("Thread time elapsed: %d\n", time_elapsed);
+        time_t finish = time(NULL);
+        tcount += (finish - start);
+        printf("Thread time elapsed: %d\n", tcount);
 
-        printf("Thread %d printing, total print job: %d, total print size: %d\n", pthread_self(), count, printed);
+        printf("Thread %d printing. Total print jobs: %d. Total job size: %d\n", pthread_self(), count, finished);
     }
 }
 
-void sig_func(int sig) {
-    signal(SIGSEGV, sig_func);
+void allocate()
+{
+    queue = mmap(NULL, MAX_JOBS * sizeof(item), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    y = mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    x = mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    mutex = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    empty = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    full = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 }
 
-int main(int argc, char *argv[]) {
+void deallocate()
+{
+    munmap(mutex, sizeof(sem_t));
+    munmap(empty, sizeof(sem_t));
+    munmap(full, sizeof(sem_t));
+    munmap(queue, MAX_JOBS * sizeof(item));
+    munmap(in, sizeof(int));
+    munmap(out, sizeof(int));
+}
+
+int main(int argc, char *argv[])
+{
     if (argc != 3) {
-        printf("Not enough or too many arguments.\n");
+        printf("Must have two arguments: number of threads and number of processes.\n");
 
         exit(1);
     }
 
-    buf = mmap(NULL, 25 * sizeof(item), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-    in = mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-    out = mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    allocate();
 
-    mutex = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-    empty = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-    full = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-
-    *in = 0;
-    *out = 0;
+    *x = 0;
+    *y = 0;
 
     pthread_t tid[3];
     int i;
 
     sem_init(mutex, 1, 1);
-    sem_init(empty, 1, 25);
+    sem_init(empty, 1, MAX_JOBS);
     sem_init(full, 1, 0);
 
-    int num_process = atoi(argv[1]);
-    int num_thread = atoi(argv[2]);
+    int processCount = atoi(argv[1]);
+    int threadCount = atoi(argv[2]);
 
-    for (i = 0; i < num_process; i++) {
-        int jobs = (rand() % 30) + 1;
-        int total_size = 0;
-        struct Print request[jobs];
+    for (i = 0; i < processCount; i++)
+    {
+        int userJobs = (rand() % MAX_USER_JOBS) + 1;
+        int total_bytes = 0;
+        struct PrintJob pending[userJobs];
 
         int j;
-        for (j = 0; j < jobs; j++) {
-            int size = (rand() % 901) + 100;
-            request[j].size = size;
-            total_size += size;
+        for (j = 0; j < userJobs; j++)
+        {
+            int bytes = (rand() % 901) + MIN_BYTES;
+            pending[j].bytes = bytes;
+            total_bytes += bytes;
         }
 
-        if (fork() == 0) {
+        if (fork() == 0)
+        {
             time_t start = time(NULL);
 
-            Producer(jobs, request, getpid());
+            User(userJobs, pending, getpid());
 
-            time_t end = time(NULL);
-            printf("Process time elapsed: %d\n", end - start);
+            time_t finish = time(NULL);
+            printf("Time to complete: %d\n", finish - start);
 
-            printf(">>> Process %d completed with: %d jobs, %d size\n", getpid(), jobs, total_size);
+            printf(">>> Process %d finished: %d jobs with size %d \n", getpid(), userJobs, total_bytes);
 
             exit(0);
         }
@@ -128,28 +162,28 @@ int main(int argc, char *argv[]) {
     sleep(1);
 
     signal(SIGINT, sig_func);
-    for (i = 0; i < num_thread; i++) {
-        if (pthread_create(&tid[i], NULL, Consumer, NULL)) {
-            printf("ERROR creating thread");
+    for (i = 0; i < threadCount; i++)
+    {
+        if (pthread_create(&tid[i], NULL, Printer, NULL))
+        {
+            printf("Error: Creating thread");
 
             exit(1);
         }
     }
 
-    for (i = 0; i < num_process; i++) {
+    //cleans up memory after processes are finished
+    for (i = 0; i < processCount; i++)
+    {
         wait(NULL);
     }
 
-    for (i = 0; i < num_thread; i++) {
+    for (i = 0; i < threadCount; i++)
+    {
         pthread_kill(tid[i], SIGINT);
     }
 
-    munmap(buf, 25 * sizeof(item));
-    munmap(in, sizeof(int));
-    munmap(out, sizeof(int));
-    munmap(mutex, sizeof(sem_t));
-    munmap(empty, sizeof(sem_t));
-    munmap(full, sizeof(sem_t));
+    deallocate();
 
     exit(0);
 }
