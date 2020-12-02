@@ -1,8 +1,3 @@
-/**
- * SJF implementation of a print server
- * Zack Keliani - CMSC 312
- * */
-
 #include <pthread.h>
 #include <semaphore.h>
 #include <stdbool.h>
